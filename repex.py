@@ -31,6 +31,9 @@ class Rep(object):
         self.Es=shared_list(range(batchsize))
         self.logP=logp
             
+        self.initial_stepsize=0.01
+        self.stepsize = sharedX(self.initial_stepsize, 'hmc_stepsize')
+
         self.betas=T.vector("betas")
         self.ii=T.ivector("ii")
         self.jj=T.ivector("jj")
@@ -54,8 +57,10 @@ class Rep(object):
         u.update({self.xs:xout})
         return thc.func_withupdate([self.betas,self.jj],[],u)
 
-    def genr(n_steps,self,orgf=HMC.run):        
-        def f(self,xs,Es):
+    def genr(self,n_steps,orgf=HMC.run):    
+        print self.xs.get_value()
+        print self.Es.get_value()
+        def f(xs,Es):
             return orgf(xs,rng,
                            self.logP,
                            self.betas,
@@ -65,7 +70,7 @@ class Rep(object):
         [xsn,Esn],u1=thc.recursion(f,[self.xs,self.Es],n_steps)
         return thc.func_withupdate([self.betas],[xsn,Esn],{self.xs:xsn[-1],self.Es:Esn[-1]})  
 
-    def genr_adp(n_steps,self,orgf=HMC.adaptiverun):        
+    def genr_adp(self,n_steps,orgf=HMC.adaptiverun):        
         def f(xs,Es,betas):
             return orgf(xs,rng,
                 self.logP,
@@ -97,7 +102,7 @@ class Rep(object):
             self.fo(betas,jj)
             self.fr()
     
-    def sample(self,ii,jj,betas,burnin):
+    def sample(self,ii,jj,betas,burnin,n_samples):
         [self.run(ii,jj,betas) for r in xrange(burnin)]
         _samples = np.asarray([self.run(ii,jj,betas) for r in xrange(n_samples)])
         return _samples.T.reshape(self.dim, -1).T
