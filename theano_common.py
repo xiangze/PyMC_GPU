@@ -9,11 +9,7 @@ import theano
 from theano import shared
 import theano.tensor as T
 from theano import function, shared
-import numpy as np
-
-from scipy import linalg
-import exchange
-
+#import exchange
 #theano.config.exception_verbosity="high"
 
 def func_withupdate(ins,outs,updates):
