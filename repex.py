@@ -37,7 +37,9 @@ class Rep(object):
         self.betas=T.vector("betas")
         self.ii=T.ivector("ii")
         self.jj=T.ivector("jj")
-
+        
+        self.rng = T.shared_randomstreams.RandomStreams(seed)
+        
     def setAdaptiveStep(self):
         self.initial_stepsize=0.01
         self.target_acceptance_rate=.9
@@ -61,7 +63,7 @@ class Rep(object):
         print self.xs.get_value()
         print self.Es.get_value()
         def f(xs,Es):
-            return orgf(xs,rng,
+            return orgf(xs,self.rng,
                            self.logP,
                            self.betas,
                            self.stepsize,
@@ -72,7 +74,7 @@ class Rep(object):
 
     def genr_adp(self,n_steps,orgf=HMC.adaptiverun):        
         def f(xs,Es,betas):
-            return orgf(xs,rng,
+            return orgf(xs,self.rng,
                 self.logP,
                 betas,
                 self.stepsize,
@@ -136,23 +138,28 @@ if __name__ == "__main__":
     
     from scipy import linalg
 
-    mu  = np.array(rng.rand(dim) * 10, dtype=theano.config.floatX)
+    mu0  = np.array(rng.rand(dim) * 10, dtype=theano.config.floatX)
+    mu1  = np.array(rng.rand(dim) * 10, dtype=theano.config.floatX)
+
     cov = np.array(rng.rand(dim, dim), dtype=theano.config.floatX)
     cov = (cov + cov.T) / 2.
     cov[np.arange(dim), np.arange(dim)] = 1.0
     cov_inv = linalg.inv(cov)
 
-    gaussian_energy=lambda x:(T.dot((x - mu), cov_inv) * (x - mu)).sum(axis=1)/2
+#    gaussian_energy=lambda x:(T.dot((x - mu), cov_inv) * (x - mu)).sum(axis=1)/2
     _gaussian=lambda x,mu,cov_inv:(T.dot((x - mu), cov_inv) * (x - mu)).sum(axis=1)/2
 
-    mixgaussianfunc=lambda x,mu,covinv: _gaussian(mu[0],covinv[0])+_gaussian(mu[1],covinv[1])
+    _gaussian0=lambda x:_gaussian(x,mu0,cov_inv)
+    _gaussian1=lambda x:_gaussian(x,mu1,cov_inv)
+
+    mixgaussianfunc=lambda x: _gaussian0(x)+_gaussian1(x)
 
     r=Rep(mixgaussianfunc,dim,batchsize,num_steps)
     r.gen(1000)
     r.runex()
     samples=r.sample(100)
             
-    print 'target mean:', mu
+    print 'target mean:', mu0,mu1
     print 'target cov:\n', cov
 
     print 'empirical mean: ', samples.mean(axis=0)
