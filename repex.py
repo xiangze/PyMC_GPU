@@ -121,46 +121,27 @@ class Rep(object):
             Ess.append(Esn)
         return xss,Ess
     
-    def samplex(self,ii,jj,betas,burnin,n_samples):
+    def sample(self,ii,jj,betas,burnin,n_samples):
         [self.run(ii,jj,betas) for r in xrange(burnin)]
         _samples=[self.run(ii,jj,betas)[0] for r in xrange(n_samples)]
         xss,Ess=zip(*_samples)
         xss=np.asarray(xss)
-        Ess=np.asarray(Ess)
-        print _samples.shape
-        return _samples.T.reshape(self.dim, -1).T
-        
-    def sample(self,ii,jj,betas,burnin,n_samples):
-        [self.run(ii,jj,betas) for r in xrange(burnin)]
-        _samples = np.asarray([self.run(ii,jj,betas) for r in xrange(n_samples)])
-        print _samples.shape
-        return _samples.T.reshape(self.dim, -1).T
-        
+        print xss.shape
+#        Ess=np.asarray(Ess)
+#        print Ess.shape
+        return xss.T.reshape(self.dim, -1).T
+                
     def showsteps(self):
         print 'final stepsize', self.stepsize.get_value()
         print 'final acceptance_rate', self.avg_acceptance_rate.get_value()
 
-    def test0(self,n_steps=100):
-        self.gen(n_steps)
-        vbetas=range(1,self.batchsize+1)
-        ii=range(0,self.batchsize-1,2)
-        jj=range(0,self.batchsize-2,2)
-        print "ii,jj",ii,jj
-
-        print self.xs.get_value()
-        print self.Es.get_value()        
-
-        self.fe(vbetas,ii)
-        print "x",self.xs.get_value()
-        self.fo(vbetas,jj)
-        print "x",self.xs.get_value()
-                        
-    def test(self,n_steps=100):
+                       
+    def test(self,exchange_steps=100):
         vbetas=range(1,self.batchsize+1)
         ii=range(0,self.batchsize-1,2)
         jj=range(0,self.batchsize-2,2)        
         self.gen(1000)
-        return self.sample(ii,jj,vbetas,num_steps/10,num_steps)
+        return self.sample(ii,jj,vbetas,exchange_steps/10,exchange_steps)
         
 if __name__ == "__main__":
     dim=3
@@ -185,7 +166,7 @@ if __name__ == "__main__":
     jj=range(0,batchsize-2,2)
     
     r=Rep(mixgaussianfunc,dim,batchsize,num_steps)
-    r.gen(1000)
+    r.gen(100)
     samples=r.sample(ii,jj,vbetas,num_steps/10,num_steps)
             
     print 'target mean:', mu0,mu1
