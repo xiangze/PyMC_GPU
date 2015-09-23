@@ -22,10 +22,9 @@ shared_list=lambda a: shared(np.array(a).T.astype(theano.config.floatX))
 
 class Rep(object):
     
-    def __init__(self,logp,dim=3, batchsize=6, n_steps=4, seed=120):
+    def __init__(self,logp,dim=3, batchsize=6,  seed=120):
         self.dim=dim
         self.batchsize=batchsize
-        self.n_steps=n_steps
         
         self.xs=shared_list([range(batchsize)]*dim)
         self.Es=shared_list(range(batchsize))
@@ -59,18 +58,27 @@ class Rep(object):
         u.update({self.xs:xout})
         return thc.func_withupdate([self.betas,self.jj],[],u)
 
-    def genr(self,n_steps,orgf=HMC.run):    
-        print self.xs.get_value()
-        print self.Es.get_value()
+    def _genr(self,n_steps,orgf=HMC.run):    
         def f(xs,Es):
             return orgf(xs,self.rng,
                            self.logP,
                            self.betas,
                            self.stepsize,
-                           self.n_steps)
+                           n_steps)
+        xsn,Esn=f(self.xs,self.Es)
+        return thc.func_withupdate([self.betas],[xsn,Esn],{self.xs:xsn,self.Es:Esn})  
+        
+    def genr(self,n_steps,orgf=HMC.run):    
+        def f(xs,Es):
+            return orgf(xs,self.rng,
+                           self.logP,
+                           self.betas,
+                           self.stepsize,
+                           1)
 
-        [xsn,Esn],u1=thc.recursion(f,[self.xs,self.Es],n_steps)
-        return thc.func_withupdate([self.betas],[xsn,Esn],{self.xs:xsn[-1],self.Es:Esn[-1]})  
+        [xsn,Esn],u=thc.recursion(f,[self.xs,self.Es],n_steps)
+        u.update({self.xs:xsn[-1],self.Es:Esn[-1]})
+        return thc.func_withupdate([self.betas],[xsn,Esn],u)  
 
     def genr_adp(self,n_steps,orgf=HMC.adaptiverun):        
         def f(xs,Es,betas):
@@ -78,7 +86,7 @@ class Rep(object):
                 self.logP,
                 betas,
                 self.stepsize,
-                self.n_steps,
+                n_steps,
                 self.avg_acceptance_rate,
                 self.step_min,
                 self.step_max,
@@ -87,7 +95,9 @@ class Rep(object):
                 self.target_acceptance_rate,
                 self.avg_acceptance_slowness)
         [xsn,Esn],u1=thc.recursion(f,[self.xs,self.Es],n_steps)
-        return thc.func_withupdate([self.betas],[xsn,Esn],{self.xs:xsn[-1],self.Es:Esn[-1]})  
+        u1.update({self.xs:xsn[-1],self.Es:Esn[-1]})
+        return thc.func_withupdate([self.betas],[xsn,Esn],u1)  
+#        return thc.func_withupdate([self.betas],[xsn,Esn],{self.xs:xsn[-1],self.Es:Esn[-1]})  
         
     def gen(self,n_steps,adaptation=False):
         self.fe=self.gene()
@@ -97,18 +107,35 @@ class Rep(object):
         else:
             self.fr=self.genr(n_steps)
  
-    def run(self,ii,jj,betas,num=1):
-        for i in xrange(num):
+    def run(self,ii,jj,betas,exchangenum=10):
+        xss=[]
+        Ess=[]
+        for i in xrange(exchangenum):
             self.fe(betas,ii)
-            self.fr()
+            xsn,Esn=self.fr(betas)
+            xss.append(xsn)
+            Ess.append(Esn)
             self.fo(betas,jj)
-            self.fr()
+            xsn,Esn=self.fr(betas)
+            xss.append(xsn)
+            Ess.append(Esn)
+        return xss,Ess
     
+    def samplex(self,ii,jj,betas,burnin,n_samples):
+        [self.run(ii,jj,betas) for r in xrange(burnin)]
+        _samples=[self.run(ii,jj,betas)[0] for r in xrange(n_samples)]
+        xss,Ess=zip(*_samples)
+        xss=np.asarray(xss)
+        Ess=np.asarray(Ess)
+        print _samples.shape
+        return _samples.T.reshape(self.dim, -1).T
+        
     def sample(self,ii,jj,betas,burnin,n_samples):
         [self.run(ii,jj,betas) for r in xrange(burnin)]
         _samples = np.asarray([self.run(ii,jj,betas) for r in xrange(n_samples)])
+        print _samples.shape
         return _samples.T.reshape(self.dim, -1).T
-    
+        
     def showsteps(self):
         print 'final stepsize', self.stepsize.get_value()
         print 'final acceptance_rate', self.avg_acceptance_rate.get_value()
@@ -129,8 +156,12 @@ class Rep(object):
         print "x",self.xs.get_value()
                         
     def test(self,n_steps=100):
-        pass
-    
+        vbetas=range(1,self.batchsize+1)
+        ii=range(0,self.batchsize-1,2)
+        jj=range(0,self.batchsize-2,2)        
+        self.gen(1000)
+        return self.sample(ii,jj,vbetas,num_steps/10,num_steps)
+        
 if __name__ == "__main__":
     dim=3
     batchsize=6
@@ -146,18 +177,16 @@ if __name__ == "__main__":
     cov[np.arange(dim), np.arange(dim)] = 1.0
     cov_inv = linalg.inv(cov)
 
-#    gaussian_energy=lambda x:(T.dot((x - mu), cov_inv) * (x - mu)).sum(axis=1)/2
     _gaussian=lambda x,mu,cov_inv:(T.dot((x - mu), cov_inv) * (x - mu)).sum(axis=1)/2
+    mixgaussianfunc=lambda x: _gaussian(x,mu0,cov_inv)+_gaussian(x,mu1,cov_inv)
 
-    _gaussian0=lambda x:_gaussian(x,mu0,cov_inv)
-    _gaussian1=lambda x:_gaussian(x,mu1,cov_inv)
-
-    mixgaussianfunc=lambda x: _gaussian0(x)+_gaussian1(x)
-
+    vbetas=range(1,batchsize+1)
+    ii=range(0,batchsize-1,2)
+    jj=range(0,batchsize-2,2)
+    
     r=Rep(mixgaussianfunc,dim,batchsize,num_steps)
     r.gen(1000)
-    r.runex()
-    samples=r.sample(100)
+    samples=r.sample(ii,jj,vbetas,num_steps/10,num_steps)
             
     print 'target mean:', mu0,mu1
     print 'target cov:\n', cov
