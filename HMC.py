@@ -9,6 +9,8 @@ import numpy
 from theano import function, shared
 from theano import tensor as T
 import theano
+import numpy as np
+
 
 sharedX = lambda X, name: shared(numpy.asarray(X, dtype=theano.config.floatX), name=name)
 shared_list=lambda a: shared(np.array(a).T.astype(theano.config.floatX))
@@ -142,10 +144,42 @@ def adaptiverun(xs_shared,rng,
 
 
 
+
     
-     
 if __name__ == "__main__":
+    import theano_common as thc
+    from scipy import linalg
     seed=120
     dim=3
     batchsize=6
     n_steps=4    
+    xs=shared_list([range(batchsize)]*dim)
+    Es=shared_list(range(batchsize))
+
+    rng = np.random.RandomState(seed)
+    mu0  = np.array(rng.rand(dim) * 10, dtype=theano.config.floatX)
+    mu1  = np.array(rng.rand(dim) * 10, dtype=theano.config.floatX)
+
+    cov = np.array(rng.rand(dim, dim), dtype=theano.config.floatX)
+    cov = (cov + cov.T) / 2.
+    cov[np.arange(dim), np.arange(dim)] = 1.0
+    cov_inv = linalg.inv(cov)
+
+    _gaussian=lambda x,mu,cov_inv:(T.dot((x - mu), cov_inv) * (x - mu)).sum(axis=1)/2
+    mixgaussianfunc=lambda x: _gaussian(x,mu0,cov_inv)+_gaussian(x,mu1,cov_inv)
+
+    stepsize=0.01
+    betas=T.vector("betas")
+    srng = T.shared_randomstreams.RandomStreams(seed)    
+
+    def f(xs,Es):
+        return run(xs,srng,
+                   mixgaussianfunc,
+                   betas,
+                   stepsize,
+                   n_steps)
+
+#    [xsn,Esn],u1=thc.recursion(f,[xs,Es],n_steps)
+#    ff=thc.func_withupdate([betas],[xsn,Esn],{xs:xsn[-1],Es:Esn[-1]})  
+    xsn,Esn=f(xs,Es)
+    ff=thc.func_withupdate([betas],[xsn,Esn],{xs:xsn,Es:Esn})  
