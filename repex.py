@@ -13,16 +13,24 @@ import theano_common as thc
 import numpy as np
 from theano import shared
 
+
 theano.config.exception_verbosity="high"
-seed=121
-rng = np.random.RandomState(seed)
 
 sharedX = lambda X, name: shared(np.asarray(X, dtype=theano.config.floatX), name=name)
 shared_list=lambda a: shared(np.array(a).T.astype(theano.config.floatX))
 
+"""
+References
+basic HMC implementation
+http://deeplearning.net/tutorial/hmc.html
+http://deeplearning.net/tutorial/code/hmc/hmc.py
+
+"""
+
 class Rep(object):
     
-    def __init__(self,logp,dim=3, batchsize=6,  seed=120):
+    def __init__(self,logp,dim=3, batchsize=6,  seed=120,debug=False):
+        assert batchsize>3 and batchsize%2==0 
         self.dim=dim
         self.batchsize=batchsize
         
@@ -38,6 +46,8 @@ class Rep(object):
         self.jj=T.ivector("jj")
         
         self.rng = T.shared_randomstreams.RandomStreams(seed)
+        self.debug=debug
+        
         
     def setAdaptiveStep(self):
         self.initial_stepsize=0.01
@@ -98,7 +108,21 @@ class Rep(object):
         u1.update({self.xs:xsn[-1],self.Es:Esn[-1]})
         return thc.func_withupdate([self.betas],[xsn,Esn],u1)  
 #        return thc.func_withupdate([self.betas],[xsn,Esn],{self.xs:xsn[-1],self.Es:Esn[-1]})  
-        
+
+    def gen_eo(self,n_steps,orgf=HMC.run):    
+        def f(xs,Es):
+            return orgf(xs,self.rng,
+                           self.logP,
+                           self.betas,
+                           self.stepsize,
+                           1)
+        xout_e,ue=exchange.exchange_even(self.xs,self.Es,self.betas,self.ii)                           
+        [xsn0,Esn0],u0=thc.recursion(f,[xout_e,self.Es],n_steps)
+        xout_o,uo=exchange.exchange_odd(xsn0[-1],Esn0[-1],self.betas,self.jj)
+        [xsn1,Esn1],u=thc.recursion(f,[xout_o,Esn0[-1]],n_steps)
+        u.update({self.xs:xsn1[-1],self.Es:Esn1[-1]})
+        return thc.func_withupdate([self.betas],[xsn0,Esn0,xsn1,Esn1],u)  
+                         
     def gen(self,n_steps,adaptation=False):
         self.fe=self.gene()
         self.fo=self.geno()
@@ -108,27 +132,29 @@ class Rep(object):
             self.fr=self.genr(n_steps)
  
     def run(self,ii,jj,betas,exchangenum=10):
-        xss=[]
-        Ess=[]
+        xss=np.zeros([1,self.batchsize,self.dim])
+        Ess=np.zeros([1,self.batchsize])
+        
         for i in xrange(exchangenum):
             self.fe(betas,ii)
             xsn,Esn=self.fr(betas)
-            xss.append(xsn)
-            Ess.append(Esn)
+            print ".",
+            xss=np.r_[xss,xsn]
+            Ess=np.r_[Ess,Esn]
             self.fo(betas,jj)
             xsn,Esn=self.fr(betas)
-            xss.append(xsn)
-            Ess.append(Esn)
+            xss=np.r_[xss,xsn]
+            Ess=np.r_[Ess,Esn]
         return xss,Ess
     
     def sample(self,ii,jj,betas,burnin,n_samples):
+        xss=np.zeros([1,self.batchsize,self.dim])
+        Ess=np.zeros([1,self.batchsize])
         [self.run(ii,jj,betas) for r in xrange(burnin)]
-        _samples=[self.run(ii,jj,betas)[0] for r in xrange(n_samples)]
-        xss,Ess=zip(*_samples)
-        xss=np.asarray(xss)
-        print xss.shape
-#        Ess=np.asarray(Ess)
-#        print Ess.shape
+        for r in xrange(n_samples):
+            xsn,Esn=self.run(ii,jj,betas)
+            xss=np.r_[xss,xsn]
+            Ess=np.r_[Ess,Esn]
         return xss.T.reshape(self.dim, -1).T
                 
     def showsteps(self):
@@ -136,42 +162,52 @@ class Rep(object):
         print 'final acceptance_rate', self.avg_acceptance_rate.get_value()
 
                        
-    def test(self,exchange_steps=100):
+    def test(self,num_step=1000,exchange_steps=10):
         vbetas=range(1,self.batchsize+1)
         ii=range(0,self.batchsize-1,2)
         jj=range(0,self.batchsize-2,2)        
-        self.gen(1000)
+        self.gen(num_step)
+        return self.sample(ii,jj,vbetas,exchange_steps/10,exchange_steps)
+
+    def test3(self,num_step=1000,exchange_steps=10):
+        vbetas=range(1,self.batchsize+1)
+        ii=range(0,self.batchsize-1,2)
+        jj=range(0,self.batchsize-2,2)        
+        self.gen_eo(num_step)
         return self.sample(ii,jj,vbetas,exchange_steps/10,exchange_steps)
         
 if __name__ == "__main__":
-    dim=3
-    batchsize=6
-    num_steps=100
+    seed=121
     
-    from scipy import linalg
-
-    mu0  = np.array(rng.rand(dim) * 10, dtype=theano.config.floatX)
-    mu1  = np.array(rng.rand(dim) * 10, dtype=theano.config.floatX)
-
-    cov = np.array(rng.rand(dim, dim), dtype=theano.config.floatX)
-    cov = (cov + cov.T) / 2.
-    cov[np.arange(dim), np.arange(dim)] = 1.0
-    cov_inv = linalg.inv(cov)
-
-    _gaussian=lambda x,mu,cov_inv:(T.dot((x - mu), cov_inv) * (x - mu)).sum(axis=1)/2
-    mixgaussianfunc=lambda x: _gaussian(x,mu0,cov_inv)+_gaussian(x,mu1,cov_inv)
+    dim=2
+    batchsize=4
+    num_onestep=100
+    num_exchange=1
+    import mixgaussian as mg
 
     vbetas=range(1,batchsize+1)
     ii=range(0,batchsize-1,2)
     jj=range(0,batchsize-2,2)
-    
-    r=Rep(mixgaussianfunc,dim,batchsize,num_steps)
-    r.gen(100)
-    samples=r.sample(ii,jj,vbetas,num_steps/10,num_steps)
-            
-    print 'target mean:', mu0,mu1
-    print 'target cov:\n', cov
 
+#    func=mg.mixgaussian(dim,size=2,seed=123,rand=True,mu0=2,mu1=-2)
+#    func=mg.gaussian(dim,size=2,rand=False,mu=2)
+    mu=2
+    rng = np.random.RandomState(seed)
+    func=lambda x:(T.dot((x - mu), mg.covinv(dim,rng)) * (x - mu)).sum(axis=1)/2
+   
+    r=Rep(func,dim,batchsize,num_onestep)
+    r.gen_eo(num_onestep)
+    r.gen(num_onestep)
+    samples=r.sample(ii,jj,vbetas,num_exchange/10,num_exchange)
+
+    print samples.shape
+    print samples[:10]
+    print "last"
+    print samples[-10:]
+    np.savetxt("3.csv",samples)
+    print 'target mean:', mu
+#    print 'target cov:\n', cov
+    
     print 'empirical mean: ', samples.mean(axis=0)
     print 'empirical_cov:\n', np.cov(samples.T)
 
