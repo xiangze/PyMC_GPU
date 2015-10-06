@@ -29,6 +29,19 @@ def mixgaussian(dim,size=10,seed=123,rand=True,mu0=2,mu1=-2):
         mu1  = np.array(rng.rand(dim) * size, dtype=theano.config.floatX)
     g0=gaussian(dim,size,seed    ,rand,mu0)
     g1=gaussian(dim,size,seed+dim,rand,mu1)
-#    _gaussian=lambda x,mu,cov_inv:(T.dot((x - mu), cov_inv) * (x - mu)).sum(axis=1)/2
-    return lambda x: g0(x)+g1(x)
+    return lambda x: -T.log(T.exp(-g0(x))+T.exp(-g1(x)))
            
+           
+if __name__ == "__main__":    
+    dim=2
+    #x=T.vector("x")#NG
+    x=T.matrix("x")
+    fm=mixgaussian(dim,size=1,rand=False)
+#    f1=gaussian(dim,size=1,rand=False)
+    ff=theano.function([x],fm(x),
+                       on_unused_input='warn',
+                       allow_input_downcast=True)
+    rng = np.random.RandomState(12)
+    for i in xrange(100):
+        a=np.array([rng.rand(dim)])
+        print a[:],ff(a)[0]
