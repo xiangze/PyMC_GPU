@@ -27,7 +27,7 @@ http://deeplearning.net/tutorial/code/hmc/hmc.py
 
 """
 
-class Rep(object):
+class PyMC_GPU(object):
     
     def __init__(self,logp,dim=3, batchsize=6,  seed=120,debug=False):
         assert batchsize>3 and batchsize%2==0 
