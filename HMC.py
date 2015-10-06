@@ -104,6 +104,8 @@ def run(xs,rng,
                 rng,xs,
                 logP,beta,
                 stepsize,n_steps)
+       accept_matrix = accept.dimshuffle(0, *(('x',) * (xn.ndim - 1)))
+       xn = T.switch(accept_matrix, xn, xs)
        return xn,En
        
 def adaptiverun(xs_shared,rng,
