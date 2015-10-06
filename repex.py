@@ -116,12 +116,15 @@ class Rep(object):
                            self.betas,
                            self.stepsize,
                            1)
-        xout_e,ue=exchange.exchange_even(self.xs,self.Es,self.betas,self.ii)                           
+        xout_e,u=exchange.exchange_even(self.xs,self.Es,self.betas,self.ii)                           
         [xsn0,Esn0],u0=thc.recursion(f,[xout_e,self.Es],n_steps)
+        u.update(u0)
         xout_o,uo=exchange.exchange_odd(xsn0[-1],Esn0[-1],self.betas,self.jj)
-        [xsn1,Esn1],u=thc.recursion(f,[xout_o,Esn0[-1]],n_steps)
+        u.update(uo)
+        [xsn1,Esn1],u1=thc.recursion(f,[xout_o,Esn0[-1]],n_steps)
+        u.update(u1)
         u.update({self.xs:xsn1[-1],self.Es:Esn1[-1]})
-        return thc.func_withupdate([self.betas],[xsn0,Esn0,xsn1,Esn1],u)  
+        self.f=thc.func_withupdate([self.betas,self.ii,self.jj],[xsn0,Esn0,xsn1,Esn1],u)  
                          
     def gen(self,n_steps,adaptation=False):
         self.fe=self.gene()
@@ -147,7 +150,9 @@ class Rep(object):
             Ess=np.r_[Ess,Esn]
         return xss,Ess
     
-    def sample(self,ii,jj,betas,burnin,n_samples):
+    def sample(self,betas,burnin,n_samples):
+        ii=range(0,self.batchsize-1,2)
+        jj=range(0,self.batchsize-2,2)
         xss=np.zeros([1,self.batchsize,self.dim])
         Ess=np.zeros([1,self.batchsize])
         [self.run(ii,jj,betas) for r in xrange(burnin)]
@@ -155,8 +160,23 @@ class Rep(object):
             xsn,Esn=self.run(ii,jj,betas)
             xss=np.r_[xss,xsn]
             Ess=np.r_[Ess,Esn]
-        return xss.T.reshape(self.dim, -1).T
-                
+        return xss,Ess
+#        return xss.T.reshape(self.dim, -1).T
+
+    def sample3(self,betas,burnin,n_samples):
+        ii=range(0,self.batchsize-1,2)
+        jj=range(0,self.batchsize-2,2)
+        xss=np.zeros([1,self.batchsize,self.dim])
+        Ess=np.zeros([1,self.batchsize])
+        [self.f(ii,jj,betas) for r in xrange(burnin)]
+        for r in xrange(n_samples):
+            xsn0,Esn0,xsn1,Esn1=self.run(betas,ii,jj)
+            xss=np.r_[xss,xsn0]
+            xss=np.r_[xss,xsn1]
+            Ess=np.r_[Ess,Esn0]
+            Ess=np.r_[Ess,Esn1]
+        return xss,Ess
+        
     def showsteps(self):
         print 'final stepsize', self.stepsize.get_value()
         print 'final acceptance_rate', self.avg_acceptance_rate.get_value()
@@ -181,14 +201,11 @@ if __name__ == "__main__":
     
     dim=2
     batchsize=4
-    num_onestep=100
+    num_onestep=1000
     num_exchange=1
     import mixgaussian as mg
 
     vbetas=range(1,batchsize+1)
-    ii=range(0,batchsize-1,2)
-    jj=range(0,batchsize-2,2)
-
 #    func=mg.mixgaussian(dim,size=2,seed=123,rand=True,mu0=2,mu1=-2)
 #    func=mg.gaussian(dim,size=2,rand=False,mu=2)
     mu=2
@@ -196,19 +213,19 @@ if __name__ == "__main__":
     func=lambda x:(T.dot((x - mu), mg.covinv(dim,rng)) * (x - mu)).sum(axis=1)/2
    
     r=Rep(func,dim,batchsize,num_onestep)
-    r.gen_eo(num_onestep)
+    #r.gen_eo(num_onestep)
     r.gen(num_onestep)
-    samples=r.sample(ii,jj,vbetas,num_exchange/10,num_exchange)
-
-    print samples.shape
-    print samples[:10]
+    samples=r.sample(vbetas,num_exchange/10,num_exchange)
+    samplex=samples[0]
+    print samplex.shape
+    print samplex[:10]
     print "last"
-    print samples[-10:]
-    np.savetxt("3.csv",samples)
+    print samplex[-10:]
+    np.savetxt("%d_%d_%d.csv"%(batchsize,num_onestep,num_exchange),samplex)
     print 'target mean:', mu
 #    print 'target cov:\n', cov
     
-    print 'empirical mean: ', samples.mean(axis=0)
-    print 'empirical_cov:\n', np.cov(samples.T)
+    print 'empirical mean: ', samplex.mean(axis=0)
+    print 'empirical_cov:\n', np.cov(samplex.T)
 
 
