@@ -1,4 +1,4 @@
-# PyMC_GPU
+# PyMC_Repex
 Replica Exchange MCMC on GPU
 ##requirement
  - Python2.7 or 3*
